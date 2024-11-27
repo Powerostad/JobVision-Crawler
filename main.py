@@ -1,8 +1,9 @@
-import os
 import logging
 import asyncio
 from typing import Dict, Any, List, Optional
 import aiohttp
+import typer
+import pandas as pd
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, select
@@ -231,12 +232,66 @@ class AsyncJobVisionScraper:
                     logger.error(f"Error on page {current_page}: {e}")
                     break
 
+    async def export_to_xlsx(self, output_path: str):
+        """
+        Export job posts from database to XLSX file
 
-async def main():
-    """Async main function to run the scraper"""
-    scraper = AsyncJobVisionScraper()
-    await scraper.scrape_jobs(keyword="backend")
+        :param output_path: Path to save the XLSX file
+        """
+        async with self.AsyncSessionLocal() as session:
+            # Fetch all job posts
+            result = await session.execute(select(JobPost))
+            job_posts = result.scalars().all()
+
+            # Convert to DataFrame
+            df = pd.DataFrame([
+                {
+                    'Job ID': job.job_vision_id,
+                    'Title': job.title,
+                    'Company': job.company,
+                    'Is Remote': job.is_remote,
+                    'Is Internship': job.is_internship,
+                    'Salary Range': job.salary_range,
+                    'Work Experience': job.work_experience,
+                    'Created At': job.created_at
+                } for job in job_posts
+            ])
+
+            # Export to XLSX
+            df.to_excel(output_path, index=False)
+            logger.info(f"Exported {len(job_posts)} jobs to {output_path}")
+
+
+# Typer CLI App
+app = typer.Typer(help="JobVision Job Scraper CLI")
+
+
+@app.command()
+def scrape(
+    keyword: str = typer.Option("backend", help="Keyword to search for jobs"),
+    database: str = typer.Option("job_posts.db", help="Path to SQLite database"),
+):
+    """Scrape job posts from JobVision"""
+    scraper = AsyncJobVisionScraper(database_path=database)
+    asyncio.run(scraper.scrape_jobs(keyword=keyword))
+    typer.echo(f"Scraping completed for keyword: {keyword}")
+
+
+@app.command()
+def export(
+    output: str = typer.Option("job_posts.xlsx", help="Path to export XLSX file"),
+    database: str = typer.Option("job_posts.db", help="Path to SQLite database"),
+):
+    """Export job posts to XLSX file"""
+    scraper = AsyncJobVisionScraper(database_path=database)
+    asyncio.run(scraper.export_to_xlsx(output_path=output))
+    typer.echo(f"Exported job posts to {output}")
+
+
+def main():
+    """Main entry point for the application"""
+    app()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
